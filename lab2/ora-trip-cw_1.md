@@ -6,7 +6,7 @@ widoki, funkcje, procedury, triggery
 
 ---
 
-Imiona i nazwiska autorów :
+Imiona i nazwiska autorów : Antoni Chmiela, Stanisław Ogonowski
 
 ---
 
