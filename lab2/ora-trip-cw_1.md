@@ -525,6 +525,11 @@ BEGIN
 END;
 /
 
+```
+
+![image](p_add_reservation.jpg)
+
+```sql
 -- p_modify_reservation_status
 CREATE OR REPLACE PROCEDURE p_modify_reservation_status(p_reservation_id INT, p_status CHAR)
 AS
@@ -561,6 +566,11 @@ BEGIN
 END;
 /
 
+```
+
+![image](p_modify_reservation_status.png)
+
+```sql
 -- p_modify_max_no_places
 CREATE OR REPLACE PROCEDURE p_modify_max_no_places(p_trip_id INT, p_max_no_places INT)
 AS
@@ -585,20 +595,11 @@ BEGIN
     WHERE trip_id = p_trip_id;
 END;
 /
-
-/*
-Komentarz dotyczący transakcji:
-Należy unikać używania polecenia 'COMMIT' bezpośrednio w procedurach PL/SQL.
-Procedura powinna stanowić logiczną jednostkę, a decyzję o zatwierdzeniu zmian (COMMIT) 
-lub ich wycofaniu (ROLLBACK) powierza się programowi lub skryptowi, który wywołuje 
-procedury. Umieszczenie COMMIT w środku odbiera możliwość grupowania operacji w większe 
-transakcje (np. wstawienie 5 rezerwacji naraz i zbiorczy COMMIT). 
-Użyty tutaj mechanizm 'RAISE_APPLICATION_ERROR' informuje wywołującego o błędzie, 
-niezatwierdzając dotychczasowych niepoprawnych stanów w bazie, dzięki czemu transakcję
-można wycofać.
-*/
-
 ```
+
+![image](p_modify_max_no_places.jpg)
+
+Delegacja zatwierdzenia transakcji przez `commit` do wnetrza procedury to antywzorzec Zarzadzanie transakcją to odpowiedzialnosc wywolawcy procedury a nie jej samej. 
 
 ---
 
@@ -645,6 +646,11 @@ BEGIN
 END;
 /
 
+```
+
+![image](trg_reservation_prevent_delete.jpg)
+
+```sql
 -- p_add_reservation_4
 CREATE OR REPLACE PROCEDURE p_add_reservation_4(p_trip_id INT, p_person_id INT)
 AS
@@ -776,6 +782,11 @@ BEGIN
 END;
 /
 
+```
+
+![image](p_add_reservation_5.jpg)
+
+```sql
 -- p_modify_reservation_status_5
 CREATE OR REPLACE PROCEDURE p_modify_reservation_status_5(p_reservation_id INT, p_status CHAR)
 AS

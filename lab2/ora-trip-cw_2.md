@@ -63,10 +63,10 @@ SET no_available_places = max_no_places - (
     FROM reservation r 
     WHERE r.trip_id = t.trip_id AND r.status IN ('N', 'P')
 );
-
-COMMIT;
-
+-- commit jesli autocommit off...
 ```
+
+![image](update%20trip.jpg)
 
 ---
 
@@ -212,7 +212,6 @@ Obsługę pola `no_available_places` należy zrealizować przy pomocy triggerów
 
 ```sql
 
--- Disable previous trigger if not disabled
 ALTER TRIGGER trg_check_available_places_5 DISABLE;
 
 -- trg_check_available_places_6b
