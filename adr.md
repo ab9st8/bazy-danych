@@ -70,9 +70,9 @@ erDiagram
         timestamp joined_at
     }
 
-    events ||--o{ seats
-    seats ||--o| reservations
-    events ||--o{ waitlist
+    events ||--o{ seats : ""
+    seats ||--o| reservations : ""
+    events ||--o{ waitlist : ""
 ```
 
 W razie rozszerzenia funkcjonalności projektu, schema może wzrosnąć o dodatkowe tabele, ale nadal powinna pozostać stosunkowo prosta.
