@@ -20,7 +20,6 @@ Zbudujemy REST API rozwiązujące **problem rezerwacji biletów na wydarzenia so
 Obraliśmy następujący stos technologiczny:
 
 - **PostgreSQL**: baza danych
-  - **server-sent events**: notyfikacje waitlistowe w prawdziwym czasie
 - **Rust**: język programowania implementacji backendu
   - **axum**: asynchroniczny framework HTTP
   - **sqlx**: asynchroniczny dostęp do bazy danych PostgreSQL
@@ -42,11 +41,38 @@ Lokalnie uruchomione serwisy porozumieją się przez setup Docker Compose. W pro
 
 ### Schema bazy danych
 
-```sql
-events       (id, name, date, venue, total_seats)
-seats        (id, event_id, status, held_until, held_by_user_id)
-reservations (id, seat_id, user_id, confirmed_at)
-waitlist     (id, event_id, user_id, joined_at)
+```mermaid
+erDiagram
+    events {
+        uuid id PK
+        string name
+        date date
+        string venue
+        int total_seats
+    }
+    seats {
+        uuid id PK
+        uuid event_id FK
+        string status
+        timestamp held_until
+        uuid held_by_user_id
+    }
+    reservations {
+        uuid id PK
+        uuid seat_id FK
+        uuid user_id
+        timestamp confirmed_at
+    }
+    waitlist {
+        uuid id PK
+        uuid event_id FK
+        uuid user_id
+        timestamp joined_at
+    }
+
+    events ||--o{ seats
+    seats ||--o| reservations
+    events ||--o{ waitlist
 ```
 
 W razie rozszerzenia funkcjonalności projektu, schema może wzrosnąć o dodatkowe tabele, ale nadal powinna pozostać stosunkowo prosta.
@@ -72,4 +98,4 @@ Ponadto:
 ## Wady i ryzyka
 
 - Składnia `LISTEN / NOTIFY` i jej powiązanie z SSE mogą być nietrywialne do zaimplementowania
-- Wzorzec "zamiatania" zamiast "debounce" (task z timeoutem, który nasłuchuje ewentualnego sygnału przedwczesnego zakończenia) gwarantuje spójność zdarzeniową (eventual consistency), ale nie jej silny wariant. Istnieje opóźnienie pomiędzy przeoczeniem zapłaty przez jednego użytkownika w określonym czasie a powiadomieniu następnego użytkownika w waitliście o możliwości zakupu. Wybrano zamiatanie zamiast debounce, ponieważ jest to bardziej trwałe rozwiązanie, które oddelegowuje źródło prawdy co do martwych rezerwacji do bazy danych, zamiast pamięci backendu, który jest podatny na downtime
+- Wzorzec "zamiatania" zamiast taska z timeoutem, który nasłuchuje ewentualnego sygnału przedwczesnego zakończenia, gwarantuje spójność zdarzeniową (eventual consistency), ale nie jej silny wariant. Istnieje opóźnienie pomiędzy przeoczeniem zapłaty przez jednego użytkownika w określonym czasie a powiadomieniu następnego użytkownika w waitliście o możliwości zakupu. Wybrano zamiatanie zamiast debounce, ponieważ jest to bardziej trwałe rozwiązanie, które oddelegowuje źródło prawdy co do martwych rezerwacji do bazy danych, zamiast pamięci backendu, który jest podatny na downtime
