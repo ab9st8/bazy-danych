@@ -1,0 +1,15 @@
+# Rust
+backend/target/
+backend/**/*.rs.bk
+
+# Docker
+.docker/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
