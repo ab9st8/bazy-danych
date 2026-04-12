@@ -21,6 +21,9 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://user:password@db:5432/tickets
+    volumes:
+      - ./backend:/usr/src/app
+      - backend_target:/usr/src/app/target
     ports:
       - "3000:3000"
     depends_on:
@@ -29,3 +32,4 @@ services:
 
 volumes:
   postgres_data:
+  backend_target:
