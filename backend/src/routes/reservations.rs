@@ -19,6 +19,11 @@ struct ReservationResponse {
     seat_id: Uuid,
 }
 
+#[derive(Serialize)]
+struct WaitlistResponse {
+    waitlist_id: Uuid,
+}
+
 pub async fn reserve(
     State(pool): State<PgPool>,
     Path(event_id): Path<Uuid>,
@@ -51,40 +56,58 @@ pub async fn reserve(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let seat_id = seat_id.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    match seat_id {
+        Some(seat_id) => {
+            sqlx::query(
+                "UPDATE seats
+                 SET status = 'held',
+                     held_until = now() + interval '15 minutes',
+                     held_by_user_id = $1
+                 WHERE id = $2",
+            )
+            .bind(body.user_id)
+            .bind(seat_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    sqlx::query(
-        "UPDATE seats
-         SET status = 'held',
-             held_until = now() + interval '15 minutes',
-             held_by_user_id = $1
-         WHERE id = $2",
-    )
-    .bind(body.user_id)
-    .bind(seat_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let reservation_id: Uuid = sqlx::query_scalar(
+                "INSERT INTO reservations (seat_id, user_id) VALUES ($1, $2) RETURNING id",
+            )
+            .bind(seat_id)
+            .bind(body.user_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let reservation_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO reservations (seat_id, user_id) VALUES ($1, $2) RETURNING id",
-    )
-    .bind(seat_id)
-    .bind(body.user_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            tx.commit()
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    tx.commit()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            Ok((
+                StatusCode::CREATED,
+                Json(ReservationResponse {
+                    reservation_id,
+                    seat_id,
+                }),
+            )
+                .into_response())
+        }
+        None => {
+            let waitlist_id: Uuid = sqlx::query_scalar(
+                "INSERT INTO waitlist (event_id, user_id) VALUES ($1, $2) RETURNING id",
+            )
+            .bind(event_id)
+            .bind(body.user_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(ReservationResponse {
-            reservation_id,
-            seat_id,
-        }),
-    )
-        .into_response())
+            tx.commit()
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            Ok((StatusCode::ACCEPTED, Json(WaitlistResponse { waitlist_id })).into_response())
+        }
+    }
 }
