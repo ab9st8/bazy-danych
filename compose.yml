@@ -22,7 +22,7 @@ services:
     environment:
       DATABASE_URL: postgres://user:password@db:5432/tickets
     volumes:
-      - ./backend:/usr/src/app
+      - ./backend:/usr/src/app:z
       - backend_target:/usr/src/app/target
     ports:
       - "3000:3000"
