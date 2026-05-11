@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
-pub struct ReserveRequest {
+struct ReserveRequest {
     user_id: Uuid,
 }
 
