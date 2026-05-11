@@ -24,7 +24,7 @@ VALUES (
     (
         'a0000000-0000-0000-0000-000000000004',
         'Konsultacje do trzeciego terminu egzaminu z Matematyki dyskretnej',
-        '2026-02-20',
+        '2027-02-20',
         'AGH D-10',
         10
     ) ON CONFLICT DO NOTHING;
