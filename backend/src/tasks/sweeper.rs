@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use sqlx::PgPool;
+use tokio::time::Instant;
 use uuid::Uuid;
 
 const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
@@ -9,15 +10,29 @@ pub async fn run(pool: PgPool) {
     let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
     loop {
         ticker.tick().await;
-        if let Err(e) = sweep(&pool).await {
-            eprintln!("sweeper error: {e}");
+        let now = Instant::now();
+        match sweep(&pool).await {
+            Ok(count) => {
+                println!(
+                    "[sweeper] sweeped {} reservation{} in {}us",
+                    count,
+                    if count == 1 { "" } else { "s" },
+                    now.elapsed().as_micros()
+                );
+            }
+            Err(e) => {
+                eprintln!("[sweeper] error: {e}");
+            }
         }
     }
 }
 
-async fn sweep(pool: &PgPool) -> Result<(), sqlx::Error> {
-    while sweep_one(pool).await? {}
-    Ok(())
+async fn sweep(pool: &PgPool) -> Result<usize, sqlx::Error> {
+    let mut count = 0;
+    while sweep_one(pool).await? {
+        count += 1;
+    }
+    Ok(count)
 }
 
 async fn sweep_one(pool: &PgPool) -> Result<bool, sqlx::Error> {
