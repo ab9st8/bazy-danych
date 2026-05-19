@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Rezerwacji Biletów</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Code+Pro:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #ececec;
+            --panel: #ffffff;
+            --border: #bdbdbd;
+            --border-strong: #8c8c8c;
+            --text-main: #1a1a1a;
+            --text-muted: #5a5a5a;
+            --row-hover: #f1f3f7;
+
+            --accent-info: #1d3a8a;
+            --accent-success: #1f6b1f;
+            --accent-warning: #8a5a00;
+            --accent-danger: #8a1f1f;
+
+            --tint-success: #e8f3e8;
+            --tint-warning: #f3ecda;
+            --tint-danger: #efe0e0;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Source Sans 3', sans-serif;
+            background: var(--bg);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 1.5rem 1rem;
+            line-height: 1.45;
+            font-size: 14px;
+        }
+
+        code, .mono { font-family: 'Source Code Pro', monospace; }
+
+        h1, h2, h3, h4 { font-weight: 700; }
+        h1 { font-size: 1.4rem; }
+        h2 { font-size: 1rem; }
+        h3 { font-size: 1rem; }
+        h4 { font-size: 0.95rem; }
+
+        .container { max-width: 1100px; margin: 0 auto; }
+
+        /* Generic panel: a plain bordered box. The legacy `glass-card` name is kept
+           so existing markup keeps working. */
+        .glass-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            padding: 1rem;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            flex-wrap: wrap;
+            padding-bottom: 0.75rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-strong);
+        }
+
+        .brand p {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-top: 0.15rem;
+        }
+
+        .user-panel {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .user-id-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        .input-text {
+            background: #fff;
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 0.35rem 0.5rem;
+            font-family: 'Source Code Pro', monospace;
+            font-size: 0.8rem;
+            outline: none;
+            width: 280px;
+            min-width: 0;
+        }
+        .input-text:focus { border-color: var(--accent-info); }
+
+        /* Buttons */
+        .btn {
+            background: #f5f5f5;
+            color: var(--text-main);
+            border: 1px solid var(--border-strong);
+            padding: 0.35rem 0.9rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+        }
+        .btn:hover { background: #e5e7ea; }
+        .btn:active { background: #d6d8db; }
+        .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+        .btn-secondary { /* same as default */ }
+
+        .btn-success {
+            background: var(--tint-success);
+            color: var(--accent-success);
+            border-color: var(--accent-success);
+        }
+        .btn-success:hover { background: #d3e6d3; }
+
+        /* Dashboard */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 1rem;
+            align-items: start;
+        }
+        @media (max-width: 900px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+        }
+
+        /* Event list — rows separated by hairlines, no gap */
+        .event-list { display: flex; flex-direction: column; }
+        .event-list h2 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            padding: 0.25rem 0 0.5rem;
+        }
+        .event-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-bottom: none;
+            padding: 0.6rem 0.75rem;
+            cursor: pointer;
+        }
+        .event-card:last-child { border-bottom: 1px solid var(--border); }
+        .event-card:hover { background: var(--row-hover); }
+        .event-card.active {
+            background: var(--row-hover);
+            border-left: 3px solid var(--accent-info);
+            padding-left: calc(0.75rem - 2px);
+        }
+        .event-card h3 { font-size: 0.95rem; margin-bottom: 0.1rem; }
+        .event-venue,
+        .event-date { font-size: 0.78rem; color: var(--text-muted); }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.05rem 0.4rem;
+            font-size: 0.72rem;
+            font-weight: 600;
+            border: 1px solid;
+            margin-right: 0.25rem;
+            margin-top: 0.3rem;
+        }
+        .badge-available { color: var(--accent-success); border-color: var(--accent-success); }
+        .badge-held { color: var(--accent-warning); border-color: var(--accent-warning); }
+        .badge-sold { color: var(--text-muted); border-color: var(--border-strong); }
+        .badge-waitlist { color: var(--accent-info); border-color: var(--accent-info); }
+
+        /* Detail panel */
+        .detail-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        /* Action bar */
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .action-info h4 { margin-bottom: 0.1rem; }
+        .action-info p { font-size: 0.82rem; color: var(--text-muted); }
+
+        /* Hold banner */
+        .hold-banner {
+            background: var(--panel);
+            border: 1px solid var(--accent-info);
+            padding: 0.85rem 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .hold-time-wrapper { display: flex; align-items: center; gap: 0.75rem; }
+        .hold-time {
+            font-family: 'Source Code Pro', monospace;
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--accent-info);
+            letter-spacing: 0.04em;
+        }
+
+        /* Waitlist banner */
+        .waitlist-banner {
+            background: var(--panel);
+            border: 1px solid var(--accent-warning);
+            padding: 0.85rem 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        /* Seat map */
+        .seat-map-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .seat-legends {
+            display: flex;
+            gap: 0.75rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            flex-wrap: wrap;
+        }
+        .legend-item { display: flex; align-items: center; gap: 0.35rem; }
+        .legend-dot {
+            width: 0.7rem;
+            height: 0.7rem;
+            border: 1px solid;
+        }
+        .dot-available  { background: var(--tint-success); border-color: var(--accent-success); }
+        .dot-held       { background: var(--tint-warning); border-color: var(--accent-warning); }
+        .dot-held-by-me { background: var(--accent-info);  border-color: var(--accent-info); }
+        .dot-sold       { background: var(--tint-danger);  border-color: var(--accent-danger); }
+
+        .seat-grid-container {
+            max-height: 480px;
+            overflow-y: auto;
+        }
+        .seat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+            gap: 4px;
+        }
+        .seat {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Source Code Pro', monospace;
+            font-size: 0.7rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid;
+            user-select: none;
+        }
+        .seat-available  { background: var(--tint-success); color: var(--accent-success); border-color: var(--accent-success); }
+        .seat-available:hover { background: var(--accent-success); color: #fff; }
+        .seat-held       { background: var(--tint-warning); color: var(--accent-warning); border-color: var(--accent-warning); cursor: not-allowed; }
+        .seat-held-by-me { background: var(--accent-info); color: #fff; border-color: var(--accent-info); }
+        .seat-sold       { background: var(--tint-danger); color: var(--accent-danger); border-color: var(--accent-danger); cursor: not-allowed; }
+
+        /* Toasts */
+        .toast-container {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            z-index: 1000;
+            max-width: 360px;
+        }
+        .toast {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 0.6rem 0.85rem;
+            font-size: 0.85rem;
+        }
+        .toast-success { border-left: 4px solid var(--accent-success); }
+        .toast-error   { border-left: 4px solid var(--accent-danger); }
+        .toast-warning { border-left: 4px solid var(--accent-warning); }
+
+        /* Spinner (used inside buttons) */
+        .spinner {
+            border: 2px solid rgba(0, 0, 0, 0.15);
+            border-left-color: currentColor;
+            width: 0.9rem;
+            height: 0.9rem;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+<link rel="modulepreload" href="/frontend-d915b25a542ee713.js" crossorigin="anonymous" integrity="sha384-577J6Uh2vAP2z3DGoeL62NAaMCLcIAoty+N0SQ2JE7CJ4aRQxk4ozSN6+ehyZ9rE"><link rel="preload" href="/frontend-d915b25a542ee713_bg.wasm" crossorigin="anonymous" integrity="sha384-e5dobH1I6Ky5/3SxwoVmf/6829PJHN7ji2qn39EhReVdylJiquxMukK88eyueRRH" as="fetch" type="application/wasm"></head>
+<body>
+    <div id="app" class="container"></div>
+
+<script type="module">
+import init, * as bindings from '/frontend-d915b25a542ee713.js';
+const wasm = await init({ module_or_path: '/frontend-d915b25a542ee713_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script><script>"use strict";
+
+(function () {
+
+    const address = '{{__TRUNK_ADDRESS__}}';
+    const base = '{{__TRUNK_WS_BASE__}}';
+    let protocol = '';
+    protocol =
+        protocol
+            ? protocol
+            : window.location.protocol === 'https:'
+                ? 'wss'
+                : 'ws';
+    const url = protocol + '://' + address + base + '.well-known/trunk/ws';
+
+    class Overlay {
+        constructor() {
+            // create an overlay
+            this._overlay = document.createElement("div");
+            const style = this._overlay.style;
+            style.height = "100vh";
+            style.width = "100vw";
+            style.position = "fixed";
+            style.top = "0";
+            style.left = "0";
+            style.backgroundColor = "rgba(222, 222, 222, 0.5)";
+            style.fontFamily = "sans-serif";
+            // not sure that's the right approach
+            style.zIndex = "1000000";
+            style.backdropFilter = "blur(1rem)";
+
+            const container = document.createElement("div");
+            // center it
+            container.style.position = "absolute";
+            container.style.top = "30%";
+            container.style.left = "15%";
+            container.style.maxWidth = "85%";
+
+            this._title = document.createElement("div");
+            this._title.innerText = "Build failure";
+            this._title.style.paddingBottom = "2rem";
+            this._title.style.fontSize = "2.5rem";
+
+            this._message = document.createElement("div");
+            this._message.style.whiteSpace = "pre-wrap";
+
+            const icon= document.createElement("div");
+            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="#dc3545" viewBox="0 0 16 16"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>';
+            this._title.prepend(icon);
+
+            container.append(this._title, this._message);
+            this._overlay.append(container);
+
+            this._inject();
+            window.setInterval(() => {
+                this._inject();
+            }, 250);
+        }
+
+        set reason(reason) {
+            this._message.textContent = reason;
+        }
+
+        _inject() {
+            if (!this._overlay.isConnected) {
+                // prepend it
+                document.body?.prepend(this._overlay);
+            }
+        }
+
+    }
+
+    class Client {
+        constructor(url) {
+            this.url = url;
+            this.poll_interval = 5000;
+            this._overlay = null;
+        }
+
+        start() {
+            const ws = new WebSocket(this.url);
+            ws.onmessage = (ev) => {
+                const msg = JSON.parse(ev.data);
+                switch (msg.type) {
+                    case "reload":
+                        this.reload();
+                        break;
+                    case "buildFailure":
+                        this.buildFailure(msg.data)
+                        break;
+                }
+            };
+            ws.onclose = () => this.onclose();
+        }
+
+        onclose() {
+            window.setTimeout(
+                () => {
+                    // when we successfully reconnect, we'll force a
+                    // reload (since we presumably lost connection to
+                    // trunk due to it being killed, so it will have
+                    // rebuilt on restart)
+                    const ws = new WebSocket(this.url);
+                    ws.onopen = () => window.location.reload();
+                    ws.onclose = () => this.onclose();
+                },
+                this.poll_interval);
+        }
+
+        reload() {
+            window.location.reload();
+        }
+
+        buildFailure({reason}) {
+            // also log the console
+            console.error("Build failed:", reason);
+
+            console.debug("Overlay", this._overlay);
+
+            if (!this._overlay) {
+                this._overlay = new Overlay();
+            }
+            this._overlay.reason = reason;
+        }
+    }
+
+    new Client(url).start();
+
+})()
+</script></body>
+</html>
