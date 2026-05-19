@@ -24,6 +24,7 @@ struct WaitlistResponse {
     waitlist_id: Uuid,
 }
 
+#[tracing::instrument(skip(pool, body), fields(user_id = %body.user_id))]
 pub async fn reserve(
     State(pool): State<PgPool>,
     Path(event_id): Path<Uuid>,
