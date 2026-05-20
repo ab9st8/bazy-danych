@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use sqlx::types::time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -128,19 +129,22 @@ pub async fn pay(
     Path(reservation_id): Path<Uuid>,
     Json(body): Json<PaymentRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let received_at = OffsetDateTime::now_utc();
+
     let mut tx = pool
         .begin()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let row: Option<(Uuid, String, Option<Uuid>, bool)> = sqlx::query_as(
-        "SELECT s.id, s.status, s.held_by_user_id, s.held_until < now() AS expired
+        "SELECT s.id, s.status, s.held_by_user_id, s.held_until < $2 AS expired
          FROM reservations r
          JOIN seats s ON s.id = r.seat_id
          WHERE r.id = $1
          FOR UPDATE OF s",
     )
     .bind(reservation_id)
+    .bind(received_at)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
