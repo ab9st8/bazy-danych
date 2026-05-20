@@ -1,11 +1,22 @@
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use tracing_subscriber::EnvFilter;
 
 mod routes;
 mod tasks;
 
+pub const HOLD_DURATION_SECS: u64 = 30;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info,sqlx=warn")),
+        )
+        .with_target(true)
+        .init();
+
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let pool: PgPool = PgPoolOptions::new()
@@ -14,16 +25,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     sqlx::migrate!().run(&pool).await?;
-    println!("[server] migrations applied successfully");
+    tracing::info!("migrations applied successfully");
 
     let seed_sql = include_str!("../seeds/seed.sql");
     sqlx::raw_sql(seed_sql).execute(&pool).await?;
-    println!("[server] seed data loaded");
+    tracing::info!("seed data loaded");
 
     tasks::spawn_all(pool.clone());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    println!("[server] listening on :3000");
+    tracing::info!("listening on :3000");
     axum::serve(listener, routes::router(pool)).await?;
 
     Ok(())

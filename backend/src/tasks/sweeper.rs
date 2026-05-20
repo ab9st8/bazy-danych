@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use sqlx::PgPool;
 use tokio::time::Instant;
+use tracing::Instrument;
 use uuid::Uuid;
+
+use crate::HOLD_DURATION_SECS;
 
 const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -10,20 +13,24 @@ pub async fn run(pool: PgPool) {
     let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
     loop {
         ticker.tick().await;
-        let now = Instant::now();
-        match sweep(&pool).await {
-            Ok(count) => {
-                println!(
-                    "[sweeper] sweeped {} reservation{} in {}us",
-                    count,
-                    if count == 1 { "" } else { "s" },
-                    now.elapsed().as_micros()
-                );
-            }
-            Err(e) => {
-                eprintln!("[sweeper] error: {e}");
+        let span = tracing::info_span!("sweep");
+        async {
+            let now = Instant::now();
+            match sweep(&pool).await {
+                Ok(count) => {
+                    tracing::info!(
+                        sweeped = count,
+                        elapsed_us = now.elapsed().as_micros() as u64,
+                        "sweep complete"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "sweep failed");
+                }
             }
         }
+        .instrument(span)
+        .await;
     }
 }
 
@@ -68,10 +75,11 @@ async fn sweep_one(pool: &PgPool) -> Result<bool, sqlx::Error> {
             sqlx::query(
                 "UPDATE seats
                  SET held_by_user_id = $1,
-                     held_until = now() + interval '15 minutes'
-                 WHERE id = $2",
+                     held_until = now() + $2
+                 WHERE id = $3",
             )
             .bind(user_id)
+            .bind(Duration::from_secs(HOLD_DURATION_SECS))
             .bind(seat_id)
             .execute(&mut *tx)
             .await?;
