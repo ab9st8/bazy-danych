@@ -40,3 +40,5 @@ Flagi konfiguracyjne:
 - `--duration <czas>` — jak długo generator ma działać, np. `30s`, `2m` (domyślnie `60s`)
 - `--event <UUID>` — wydarzenie docelowe; flaga powtarzalna (domyślnie cztery UUID-y z seeda)
 - `--snapshot-interval <czas>` — częstotliwość migawek stanu (domyślnie `5s`)
+- `--pay-probability <float>` — odsetek rezerwacji, które zostaną opłacone (0.0–1.0; pozostałe sesje porzucają rezerwację bez wywołania endpointu płatności, domyślnie `0.7`)
+- `--max-pay-delay <czas>` — górne ograniczenie opóźnienia między rezerwacją a płatnością; faktyczne opóźnienie ma rozkład jednostajny w `[0, max]` (domyślnie `10s`)

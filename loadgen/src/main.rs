@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::Parser;
+use rand::Rng;
 use rand::seq::SliceRandom;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,22 @@ struct Args {
     /// Interval for rolling stats snapshots.
     #[arg(long, default_value = "5s", value_parser = humantime::parse_duration)]
     snapshot_interval: Duration,
+
+    /// Probability that a held reservation will eventually be paid (0.0–1.0).
+    /// The remainder are abandoned (no pay HTTP call ever fires).
+    #[arg(long, default_value_t = 0.7)]
+    pay_probability: f64,
+
+    /// Upper bound on the delay between reserve and pay. Actual delay is uniform
+    /// random in [0, max].
+    #[arg(long, default_value = "10s", value_parser = humantime::parse_duration)]
+    max_pay_delay: Duration,
+}
+
+#[derive(Clone, Copy)]
+struct Workload {
+    pay_probability: f64,
+    max_pay_delay: Duration,
 }
 
 #[derive(Serialize)]
@@ -65,6 +82,7 @@ enum Outcome {
     ReserveWaitlisted { latency_ms: u64 },
     ReserveError { latency_ms: u64 },
     ReserveNetworkError,
+    Abandoned,
     PayOk { latency_ms: u64 },
     PayExpired { latency_ms: u64 },
     PayConflict { latency_ms: u64 },
@@ -78,6 +96,7 @@ struct Stats {
     reserve_waitlisted: u64,
     reserve_error: u64,
     reserve_network_error: u64,
+    abandoned: u64,
     pay_ok: u64,
     pay_expired: u64,
     pay_conflict: u64,
@@ -106,6 +125,9 @@ impl Stats {
             }
             Outcome::ReserveNetworkError => {
                 self.reserve_network_error += 1;
+            }
+            Outcome::Abandoned => {
+                self.abandoned += 1;
             }
             Outcome::PayOk { latency_ms } => {
                 self.pay_ok += 1;
@@ -166,6 +188,7 @@ impl Stats {
             reserve_wait = self.reserve_waitlisted,
             reserve_err = self.reserve_error,
             reserve_net = self.reserve_network_error,
+            abandoned = self.abandoned,
             pay_ok = self.pay_ok,
             pay_expired = self.pay_expired,
             pay_conflict = self.pay_conflict,
@@ -224,11 +247,17 @@ async fn main() -> Result<()> {
     };
 
     let interval_per_request = Duration::from_secs_f64(60.0 / args.rpm as f64);
+    let workload = Workload {
+        pay_probability: args.pay_probability,
+        max_pay_delay: args.max_pay_delay,
+    };
     tracing::info!(
         rpm = args.rpm,
         concurrency = args.concurrency,
         duration_s = args.duration.as_secs(),
         events = events.len(),
+        pay_probability = args.pay_probability,
+        max_pay_delay_s = args.max_pay_delay.as_secs(),
         "loadgen starting"
     );
 
@@ -267,7 +296,7 @@ async fn main() -> Result<()> {
 
         tokio::spawn(async move {
             let _permit = permit;
-            run_one(client, base_url, event_id, tx).await;
+            run_one(client, base_url, event_id, tx, workload).await;
         });
     }
 
@@ -286,6 +315,7 @@ async fn run_one(
     base_url: Arc<String>,
     event_id: Uuid,
     tx: mpsc::Sender<Outcome>,
+    workload: Workload,
 ) {
     let user_id = Uuid::new_v4();
     let reserve_url = format!("{}/events/{}/reservations", base_url, event_id);
@@ -338,7 +368,28 @@ async fn run_one(
             );
             let _ = tx.send(Outcome::ReserveHeld { latency_ms }).await;
 
-            pay(&client, &base_url, user_id, body.reservation_id, &tx).await;
+            let (will_pay, delay) = {
+                let mut rng = rand::thread_rng();
+                let will_pay = rng.r#gen::<f64>() < workload.pay_probability;
+                let max_ms = workload.max_pay_delay.as_millis() as u64;
+                let delay = if will_pay && max_ms > 0 {
+                    Duration::from_millis(rng.gen_range(0..=max_ms))
+                } else {
+                    Duration::ZERO
+                };
+                (will_pay, delay)
+            };
+            if will_pay {
+                tokio::time::sleep(delay).await;
+                pay(&client, &base_url, user_id, body.reservation_id, &tx).await;
+            } else {
+                tracing::info!(
+                    user = %user_id,
+                    reservation = %body.reservation_id,
+                    "abandoned"
+                );
+                let _ = tx.send(Outcome::Abandoned).await;
+            }
         }
         202 => {
             tracing::info!(
