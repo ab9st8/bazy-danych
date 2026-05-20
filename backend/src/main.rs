@@ -5,6 +5,8 @@ use tracing_subscriber::EnvFilter;
 mod routes;
 mod tasks;
 
+pub const HOLD_DURATION_SECS: u64 = 30;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()

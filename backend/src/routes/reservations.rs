@@ -4,9 +4,13 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
+
+use crate::HOLD_DURATION_SECS;
 
 #[derive(Deserialize)]
 pub struct ReserveRequest {
@@ -62,10 +66,11 @@ pub async fn reserve(
             sqlx::query(
                 "UPDATE seats
                  SET status = 'held',
-                     held_until = now() + interval '15 minutes',
-                     held_by_user_id = $1
-                 WHERE id = $2",
+                     held_until = now() + $1,
+                     held_by_user_id = $2
+                 WHERE id = $3",
             )
+            .bind(Duration::from_secs(HOLD_DURATION_SECS))
             .bind(body.user_id)
             .bind(seat_id)
             .execute(&mut *tx)
