@@ -61,7 +61,7 @@ pub async fn reserve(
             sqlx::query(
                 "UPDATE seats
                  SET status = 'held',
-                     held_until = now() + interval '15 minutes',
+                     held_until = now() + interval '30 seconds',
                      held_by_user_id = $1
                  WHERE id = $2",
             )

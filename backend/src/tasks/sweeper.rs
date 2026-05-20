@@ -68,7 +68,7 @@ async fn sweep_one(pool: &PgPool) -> Result<bool, sqlx::Error> {
             sqlx::query(
                 "UPDATE seats
                  SET held_by_user_id = $1,
-                     held_until = now() + interval '15 minutes'
+                     held_until = now() + interval '30 seconds'
                  WHERE id = $2",
             )
             .bind(user_id)
