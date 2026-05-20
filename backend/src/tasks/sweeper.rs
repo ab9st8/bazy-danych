@@ -4,6 +4,8 @@ use sqlx::PgPool;
 use tokio::time::Instant;
 use uuid::Uuid;
 
+use crate::HOLD_DURATION_SECS;
+
 const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 
 pub async fn run(pool: PgPool) {
@@ -68,10 +70,11 @@ async fn sweep_one(pool: &PgPool) -> Result<bool, sqlx::Error> {
             sqlx::query(
                 "UPDATE seats
                  SET held_by_user_id = $1,
-                     held_until = now() + interval '30 seconds'
-                 WHERE id = $2",
+                     held_until = now() + $2
+                 WHERE id = $3",
             )
             .bind(user_id)
+            .bind(Duration::from_secs(HOLD_DURATION_SECS))
             .bind(seat_id)
             .execute(&mut *tx)
             .await?;
