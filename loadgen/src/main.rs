@@ -90,6 +90,23 @@ enum Outcome {
     PayNetworkError,
 }
 
+impl Outcome {
+    fn latency_ms(&self) -> Option<u64> {
+        match self {
+            Outcome::ReserveHeld { latency_ms }
+            | Outcome::ReserveWaitlisted { latency_ms }
+            | Outcome::ReserveError { latency_ms }
+            | Outcome::PayOk { latency_ms }
+            | Outcome::PayExpired { latency_ms }
+            | Outcome::PayConflict { latency_ms }
+            | Outcome::PayError { latency_ms } => Some(*latency_ms),
+            Outcome::ReserveNetworkError
+            | Outcome::Abandoned
+            | Outcome::PayNetworkError => None,
+        }
+    }
+}
+
 #[derive(Default)]
 struct Stats {
     reserve_held: u64,
@@ -110,45 +127,22 @@ struct Stats {
 
 impl Stats {
     fn record(&mut self, outcome: Outcome) {
-        match outcome {
-            Outcome::ReserveHeld { latency_ms } => {
-                self.reserve_held += 1;
-                self.observe_latency(latency_ms);
-            }
-            Outcome::ReserveWaitlisted { latency_ms } => {
-                self.reserve_waitlisted += 1;
-                self.observe_latency(latency_ms);
-            }
-            Outcome::ReserveError { latency_ms } => {
-                self.reserve_error += 1;
-                self.observe_latency(latency_ms);
-            }
-            Outcome::ReserveNetworkError => {
-                self.reserve_network_error += 1;
-            }
-            Outcome::Abandoned => {
-                self.abandoned += 1;
-            }
-            Outcome::PayOk { latency_ms } => {
-                self.pay_ok += 1;
-                self.observe_latency(latency_ms);
-            }
-            Outcome::PayExpired { latency_ms } => {
-                self.pay_expired += 1;
-                self.observe_latency(latency_ms);
-            }
-            Outcome::PayConflict { latency_ms } => {
-                self.pay_conflict += 1;
-                self.observe_latency(latency_ms);
-            }
-            Outcome::PayError { latency_ms } => {
-                self.pay_error += 1;
-                self.observe_latency(latency_ms);
-            }
-            Outcome::PayNetworkError => {
-                self.pay_network_error += 1;
-            }
+        if let Some(latency_ms) = outcome.latency_ms() {
+            self.observe_latency(latency_ms);
         }
+        let counter = match outcome {
+            Outcome::ReserveHeld { .. } => &mut self.reserve_held,
+            Outcome::ReserveWaitlisted { .. } => &mut self.reserve_waitlisted,
+            Outcome::ReserveError { .. } => &mut self.reserve_error,
+            Outcome::ReserveNetworkError => &mut self.reserve_network_error,
+            Outcome::Abandoned => &mut self.abandoned,
+            Outcome::PayOk { .. } => &mut self.pay_ok,
+            Outcome::PayExpired { .. } => &mut self.pay_expired,
+            Outcome::PayConflict { .. } => &mut self.pay_conflict,
+            Outcome::PayError { .. } => &mut self.pay_error,
+            Outcome::PayNetworkError => &mut self.pay_network_error,
+        };
+        *counter += 1;
     }
 
     fn observe_latency(&mut self, ms: u64) {
@@ -209,7 +203,7 @@ async fn aggregate(
 ) {
     let mut stats = Stats::default();
     let mut snapshot = tokio::time::interval(snapshot_interval);
-    snapshot.tick().await; // discard the immediate first tick
+    snapshot.tick().await;
 
     loop {
         tokio::select! {
@@ -226,53 +220,39 @@ async fn aggregate(
     stats.log(started_at.elapsed(), "summary");
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .with_target(true)
         .init();
+}
 
-    let args = Args::parse();
-
-    let events: Vec<Uuid> = if args.events.is_empty() {
+fn resolve_events(args: &Args) -> Vec<Uuid> {
+    if args.events.is_empty() {
         SEEDED_EVENT_IDS
             .iter()
             .map(|s| s.parse().expect("seeded uuid"))
             .collect()
     } else {
         args.events.clone()
-    };
+    }
+}
 
-    let interval_per_request = Duration::from_secs_f64(60.0 / args.rpm as f64);
-    let workload = Workload {
-        pay_probability: args.pay_probability,
-        max_pay_delay: args.max_pay_delay,
-    };
-    tracing::info!(
-        rpm = args.rpm,
-        concurrency = args.concurrency,
-        duration_s = args.duration.as_secs(),
-        events = events.len(),
-        pay_probability = args.pay_probability,
-        max_pay_delay_s = args.max_pay_delay.as_secs(),
-        "loadgen starting"
-    );
-
-    let (tx, rx) = mpsc::channel::<Outcome>(1024);
-    let started_at = Instant::now();
-    let aggregator = tokio::spawn(aggregate(rx, args.snapshot_interval, started_at));
-
-    let client = Arc::new(Client::new());
-    let sem = Arc::new(Semaphore::new(args.concurrency));
-    let base_url = Arc::new(args.base_url);
-
-    let mut ticker = tokio::time::interval(interval_per_request);
+async fn dispatch_workers(
+    client: Arc<Client>,
+    sem: Arc<Semaphore>,
+    base_url: Arc<String>,
+    events: Vec<Uuid>,
+    workload: Workload,
+    interval: Duration,
+    deadline: Instant,
+    tx: mpsc::Sender<Outcome>,
+) {
+    let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    let deadline = started_at + args.duration;
     while Instant::now() < deadline {
         ticker.tick().await;
         if Instant::now() >= deadline {
@@ -299,6 +279,49 @@ async fn main() -> Result<()> {
             run_one(client, base_url, event_id, tx, workload).await;
         });
     }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    init_tracing();
+
+    let args = Args::parse();
+    let events = resolve_events(&args);
+    let workload = Workload {
+        pay_probability: args.pay_probability,
+        max_pay_delay: args.max_pay_delay,
+    };
+    let interval = Duration::from_secs_f64(60.0 / args.rpm as f64);
+
+    tracing::info!(
+        rpm = args.rpm,
+        concurrency = args.concurrency,
+        duration_s = args.duration.as_secs(),
+        events = events.len(),
+        pay_probability = args.pay_probability,
+        max_pay_delay_s = args.max_pay_delay.as_secs(),
+        "loadgen starting"
+    );
+
+    let (tx, rx) = mpsc::channel::<Outcome>(1024);
+    let started_at = Instant::now();
+    let aggregator = tokio::spawn(aggregate(rx, args.snapshot_interval, started_at));
+
+    let client = Arc::new(Client::new());
+    let sem = Arc::new(Semaphore::new(args.concurrency));
+    let base_url = Arc::new(args.base_url);
+
+    dispatch_workers(
+        client,
+        sem.clone(),
+        base_url,
+        events,
+        workload,
+        interval,
+        started_at + args.duration,
+        tx.clone(),
+    )
+    .await;
 
     let _drain = sem
         .acquire_many(args.concurrency as u32)
