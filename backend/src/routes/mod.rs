@@ -11,6 +11,10 @@ pub fn router(pool: PgPool) -> Router {
             "/events/{event_id}/reservations",
             post(reservations::reserve),
         )
+        .route(
+            "/reservations/{reservation_id}/payment",
+            post(reservations::pay),
+        )
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
