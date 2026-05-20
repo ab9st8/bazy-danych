@@ -9,5 +9,9 @@ pub fn router(pool: PgPool) -> Router {
             "/events/{event_id}/reservations",
             post(reservations::reserve),
         )
+        .route(
+            "/reservations/{reservation_id}/payment",
+            post(reservations::pay),
+        )
         .with_state(pool)
 }
