@@ -4,9 +4,14 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use sqlx::types::time::OffsetDateTime;
 use uuid::Uuid;
+
+use crate::HOLD_DURATION_SECS;
 
 #[derive(Deserialize)]
 pub struct ReserveRequest {
@@ -24,6 +29,18 @@ struct WaitlistResponse {
     waitlist_id: Uuid,
 }
 
+#[derive(Deserialize)]
+pub struct PaymentRequest {
+    user_id: Uuid,
+}
+
+#[derive(Serialize)]
+struct PaymentResponse {
+    reservation_id: Uuid,
+    seat_id: Uuid,
+}
+
+#[tracing::instrument(skip(pool, body), fields(user_id = %body.user_id))]
 pub async fn reserve(
     State(pool): State<PgPool>,
     Path(event_id): Path<Uuid>,
@@ -61,10 +78,11 @@ pub async fn reserve(
             sqlx::query(
                 "UPDATE seats
                  SET status = 'held',
-                     held_until = now() + interval '15 minutes',
-                     held_by_user_id = $1
-                 WHERE id = $2",
+                     held_until = now() + $1,
+                     held_by_user_id = $2
+                 WHERE id = $3",
             )
+            .bind(Duration::from_secs(HOLD_DURATION_SECS))
             .bind(body.user_id)
             .bind(seat_id)
             .execute(&mut *tx)
@@ -110,4 +128,67 @@ pub async fn reserve(
             Ok((StatusCode::ACCEPTED, Json(WaitlistResponse { waitlist_id })).into_response())
         }
     }
+}
+
+pub async fn pay(
+    State(pool): State<PgPool>,
+    Path(reservation_id): Path<Uuid>,
+    Json(body): Json<PaymentRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let received_at = OffsetDateTime::now_utc();
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let row: Option<(Uuid, String, Option<Uuid>, bool)> = sqlx::query_as(
+        "SELECT s.id, s.status, s.held_by_user_id, s.held_until < $2 AS expired
+         FROM reservations r
+         JOIN seats s ON s.id = r.seat_id
+         WHERE r.id = $1
+         FOR UPDATE OF s",
+    )
+    .bind(reservation_id)
+    .bind(received_at)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let Some((seat_id, status, held_by, expired)) = row else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    if status != "held" || held_by != Some(body.user_id) {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    if expired {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    sqlx::query(
+        "UPDATE seats
+         SET status = 'sold',
+             held_until = NULL,
+             held_by_user_id = NULL
+         WHERE id = $1",
+    )
+    .bind(seat_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(PaymentResponse {
+            reservation_id,
+            seat_id,
+        }),
+    )
+        .into_response())
 }
