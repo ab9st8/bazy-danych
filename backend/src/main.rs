@@ -4,6 +4,8 @@ use sqlx::postgres::PgPoolOptions;
 mod routes;
 mod tasks;
 
+pub const HOLD_DURATION_SECS: u64 = 30;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
