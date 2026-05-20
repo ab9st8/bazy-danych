@@ -6,7 +6,7 @@ use clap::Parser;
 use rand::seq::SliceRandom;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, mpsc};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -38,6 +38,10 @@ struct Args {
     /// Event UUID to target. Repeatable. Defaults to the four seeded UUIDs.
     #[arg(long = "event")]
     events: Vec<Uuid>,
+
+    /// Interval for rolling stats snapshots.
+    #[arg(long, default_value = "5s", value_parser = humantime::parse_duration)]
+    snapshot_interval: Duration,
 }
 
 #[derive(Serialize)]
@@ -53,6 +57,150 @@ struct ReserveResponse {
 #[derive(Serialize)]
 struct PaymentBody {
     user_id: Uuid,
+}
+
+#[derive(Debug)]
+enum Outcome {
+    ReserveHeld { latency_ms: u64 },
+    ReserveWaitlisted { latency_ms: u64 },
+    ReserveError { latency_ms: u64 },
+    ReserveNetworkError,
+    PayOk { latency_ms: u64 },
+    PayExpired { latency_ms: u64 },
+    PayConflict { latency_ms: u64 },
+    PayError { latency_ms: u64 },
+    PayNetworkError,
+}
+
+#[derive(Default)]
+struct Stats {
+    reserve_held: u64,
+    reserve_waitlisted: u64,
+    reserve_error: u64,
+    reserve_network_error: u64,
+    pay_ok: u64,
+    pay_expired: u64,
+    pay_conflict: u64,
+    pay_error: u64,
+    pay_network_error: u64,
+    latency_min_ms: Option<u64>,
+    latency_max_ms: u64,
+    latency_sum_ms: u128,
+    latency_count: u64,
+}
+
+impl Stats {
+    fn record(&mut self, outcome: Outcome) {
+        match outcome {
+            Outcome::ReserveHeld { latency_ms } => {
+                self.reserve_held += 1;
+                self.observe_latency(latency_ms);
+            }
+            Outcome::ReserveWaitlisted { latency_ms } => {
+                self.reserve_waitlisted += 1;
+                self.observe_latency(latency_ms);
+            }
+            Outcome::ReserveError { latency_ms } => {
+                self.reserve_error += 1;
+                self.observe_latency(latency_ms);
+            }
+            Outcome::ReserveNetworkError => {
+                self.reserve_network_error += 1;
+            }
+            Outcome::PayOk { latency_ms } => {
+                self.pay_ok += 1;
+                self.observe_latency(latency_ms);
+            }
+            Outcome::PayExpired { latency_ms } => {
+                self.pay_expired += 1;
+                self.observe_latency(latency_ms);
+            }
+            Outcome::PayConflict { latency_ms } => {
+                self.pay_conflict += 1;
+                self.observe_latency(latency_ms);
+            }
+            Outcome::PayError { latency_ms } => {
+                self.pay_error += 1;
+                self.observe_latency(latency_ms);
+            }
+            Outcome::PayNetworkError => {
+                self.pay_network_error += 1;
+            }
+        }
+    }
+
+    fn observe_latency(&mut self, ms: u64) {
+        self.latency_min_ms = Some(self.latency_min_ms.map_or(ms, |m| m.min(ms)));
+        self.latency_max_ms = self.latency_max_ms.max(ms);
+        self.latency_sum_ms += ms as u128;
+        self.latency_count += 1;
+    }
+
+    fn sessions(&self) -> u64 {
+        self.reserve_held
+            + self.reserve_waitlisted
+            + self.reserve_error
+            + self.reserve_network_error
+    }
+
+    fn avg_latency_ms(&self) -> u64 {
+        if self.latency_count == 0 {
+            0
+        } else {
+            (self.latency_sum_ms / self.latency_count as u128) as u64
+        }
+    }
+
+    fn log(&self, elapsed: Duration, kind: &str) {
+        let elapsed_s = elapsed.as_secs_f64();
+        let rate = if elapsed_s > 0.0 {
+            self.sessions() as f64 / elapsed_s
+        } else {
+            0.0
+        };
+        tracing::info!(
+            elapsed_s = elapsed_s as u64,
+            sessions = self.sessions(),
+            rate_per_s = format!("{rate:.1}"),
+            reserve_held = self.reserve_held,
+            reserve_wait = self.reserve_waitlisted,
+            reserve_err = self.reserve_error,
+            reserve_net = self.reserve_network_error,
+            pay_ok = self.pay_ok,
+            pay_expired = self.pay_expired,
+            pay_conflict = self.pay_conflict,
+            pay_err = self.pay_error,
+            pay_net = self.pay_network_error,
+            latency_min_ms = self.latency_min_ms.unwrap_or(0),
+            latency_avg_ms = self.avg_latency_ms(),
+            latency_max_ms = self.latency_max_ms,
+            "{kind}"
+        );
+    }
+}
+
+async fn aggregate(
+    mut rx: mpsc::Receiver<Outcome>,
+    snapshot_interval: Duration,
+    started_at: Instant,
+) {
+    let mut stats = Stats::default();
+    let mut snapshot = tokio::time::interval(snapshot_interval);
+    snapshot.tick().await; // discard the immediate first tick
+
+    loop {
+        tokio::select! {
+            msg = rx.recv() => match msg {
+                Some(outcome) => stats.record(outcome),
+                None => break,
+            },
+            _ = snapshot.tick() => {
+                stats.log(started_at.elapsed(), "snapshot");
+            }
+        }
+    }
+
+    stats.log(started_at.elapsed(), "summary");
 }
 
 #[tokio::main]
@@ -84,6 +232,10 @@ async fn main() -> Result<()> {
         "loadgen starting"
     );
 
+    let (tx, rx) = mpsc::channel::<Outcome>(1024);
+    let started_at = Instant::now();
+    let aggregator = tokio::spawn(aggregate(rx, args.snapshot_interval, started_at));
+
     let client = Arc::new(Client::new());
     let sem = Arc::new(Semaphore::new(args.concurrency));
     let base_url = Arc::new(args.base_url);
@@ -91,7 +243,7 @@ async fn main() -> Result<()> {
     let mut ticker = tokio::time::interval(interval_per_request);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    let deadline = Instant::now() + args.duration;
+    let deadline = started_at + args.duration;
     while Instant::now() < deadline {
         ticker.tick().await;
         if Instant::now() >= deadline {
@@ -111,10 +263,11 @@ async fn main() -> Result<()> {
             .expect("non-empty events");
         let client = client.clone();
         let base_url = base_url.clone();
+        let tx = tx.clone();
 
         tokio::spawn(async move {
             let _permit = permit;
-            run_one(client, base_url, event_id).await;
+            run_one(client, base_url, event_id, tx).await;
         });
     }
 
@@ -122,12 +275,18 @@ async fn main() -> Result<()> {
         .acquire_many(args.concurrency as u32)
         .await
         .expect("acquire all");
-    tracing::info!("loadgen done");
+    drop(tx);
+    aggregator.await.expect("aggregator panicked");
 
     Ok(())
 }
 
-async fn run_one(client: Arc<Client>, base_url: Arc<String>, event_id: Uuid) {
+async fn run_one(
+    client: Arc<Client>,
+    base_url: Arc<String>,
+    event_id: Uuid,
+    tx: mpsc::Sender<Outcome>,
+) {
     let user_id = Uuid::new_v4();
     let reserve_url = format!("{}/events/{}/reservations", base_url, event_id);
 
@@ -148,12 +307,12 @@ async fn run_one(client: Arc<Client>, base_url: Arc<String>, event_id: Uuid) {
                 error = %e,
                 "reserve network error"
             );
+            let _ = tx.send(Outcome::ReserveNetworkError).await;
             return;
         }
     };
 
     let status = res.status().as_u16();
-
     match status {
         201 => {
             let body: ReserveResponse = match res.json().await {
@@ -165,6 +324,7 @@ async fn run_one(client: Arc<Client>, base_url: Arc<String>, event_id: Uuid) {
                         error = %e,
                         "reserve 201 body parse failed"
                     );
+                    let _ = tx.send(Outcome::ReserveError { latency_ms }).await;
                     return;
                 }
             };
@@ -176,8 +336,9 @@ async fn run_one(client: Arc<Client>, base_url: Arc<String>, event_id: Uuid) {
                 latency_ms,
                 "reserve held"
             );
+            let _ = tx.send(Outcome::ReserveHeld { latency_ms }).await;
 
-            pay(&client, &base_url, user_id, body.reservation_id).await;
+            pay(&client, &base_url, user_id, body.reservation_id, &tx).await;
         }
         202 => {
             tracing::info!(
@@ -187,6 +348,7 @@ async fn run_one(client: Arc<Client>, base_url: Arc<String>, event_id: Uuid) {
                 latency_ms,
                 "reserve waitlisted"
             );
+            let _ = tx.send(Outcome::ReserveWaitlisted { latency_ms }).await;
         }
         s => {
             tracing::warn!(
@@ -196,11 +358,18 @@ async fn run_one(client: Arc<Client>, base_url: Arc<String>, event_id: Uuid) {
                 latency_ms,
                 "reserve unexpected"
             );
+            let _ = tx.send(Outcome::ReserveError { latency_ms }).await;
         }
     }
 }
 
-async fn pay(client: &Client, base_url: &str, user_id: Uuid, reservation_id: Uuid) {
+async fn pay(
+    client: &Client,
+    base_url: &str,
+    user_id: Uuid,
+    reservation_id: Uuid,
+    tx: &mpsc::Sender<Outcome>,
+) {
     let url = format!("{}/reservations/{}/payment", base_url, reservation_id);
 
     let start = Instant::now();
@@ -211,34 +380,46 @@ async fn pay(client: &Client, base_url: &str, user_id: Uuid, reservation_id: Uui
         Ok(r) => {
             let s = r.status().as_u16();
             match s {
-                200 => tracing::info!(
-                    user = %user_id,
-                    reservation = %reservation_id,
-                    status = s,
-                    latency_ms,
-                    "pay ok"
-                ),
-                403 => tracing::info!(
-                    user = %user_id,
-                    reservation = %reservation_id,
-                    status = s,
-                    latency_ms,
-                    "pay expired"
-                ),
-                409 => tracing::info!(
-                    user = %user_id,
-                    reservation = %reservation_id,
-                    status = s,
-                    latency_ms,
-                    "pay conflict"
-                ),
-                _ => tracing::warn!(
-                    user = %user_id,
-                    reservation = %reservation_id,
-                    status = s,
-                    latency_ms,
-                    "pay unexpected"
-                ),
+                200 => {
+                    tracing::info!(
+                        user = %user_id,
+                        reservation = %reservation_id,
+                        status = s,
+                        latency_ms,
+                        "pay ok"
+                    );
+                    let _ = tx.send(Outcome::PayOk { latency_ms }).await;
+                }
+                403 => {
+                    tracing::info!(
+                        user = %user_id,
+                        reservation = %reservation_id,
+                        status = s,
+                        latency_ms,
+                        "pay expired"
+                    );
+                    let _ = tx.send(Outcome::PayExpired { latency_ms }).await;
+                }
+                409 => {
+                    tracing::info!(
+                        user = %user_id,
+                        reservation = %reservation_id,
+                        status = s,
+                        latency_ms,
+                        "pay conflict"
+                    );
+                    let _ = tx.send(Outcome::PayConflict { latency_ms }).await;
+                }
+                _ => {
+                    tracing::warn!(
+                        user = %user_id,
+                        reservation = %reservation_id,
+                        status = s,
+                        latency_ms,
+                        "pay unexpected"
+                    );
+                    let _ = tx.send(Outcome::PayError { latency_ms }).await;
+                }
             }
         }
         Err(e) => {
@@ -248,6 +429,7 @@ async fn pay(client: &Client, base_url: &str, user_id: Uuid, reservation_id: Uui
                 error = %e,
                 "pay network error"
             );
+            let _ = tx.send(Outcome::PayNetworkError).await;
         }
     }
 }
