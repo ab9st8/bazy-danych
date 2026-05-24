@@ -16,6 +16,7 @@ use crate::HOLD_DURATION_SECS;
 #[derive(Deserialize)]
 pub struct ReserveRequest {
     user_id: Uuid,
+    seat_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -62,16 +63,29 @@ pub async fn reserve(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let seat_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM seats
-         WHERE event_id = $1 AND status = 'available'
-         LIMIT 1
-         FOR UPDATE SKIP LOCKED",
-    )
-    .bind(event_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let seat_id: Option<Uuid> = if let Some(req_seat_id) = body.seat_id {
+        sqlx::query_scalar(
+            "SELECT id FROM seats
+             WHERE id = $1 AND event_id = $2 AND status = 'available'
+             FOR UPDATE",
+        )
+        .bind(req_seat_id)
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    } else {
+        sqlx::query_scalar(
+            "SELECT id FROM seats
+             WHERE event_id = $1 AND status = 'available'
+             LIMIT 1
+             FOR UPDATE SKIP LOCKED",
+        )
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
 
     match seat_id {
         Some(seat_id) => {

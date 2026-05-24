@@ -280,7 +280,7 @@ pub fn App() -> impl IntoView {
     let handle_reserve = {
         let add_toast = add_toast.clone();
 
-        move || {
+        move |chosen_seat_id: Option<Uuid>| {
             let evt_id = match selected_event_id.get() {
                 Some(id) => id,
                 None => return,
@@ -290,7 +290,7 @@ pub fn App() -> impl IntoView {
             is_reserving.set(true);
             let add_toast = add_toast.clone();
             spawn_local(async move {
-                match api::reserve_seat(evt_id, uid).await {
+                match api::reserve_seat(evt_id, uid, chosen_seat_id).await {
                     Ok(ReserveResult::Reserved(_res)) => {
                         add_toast(
                             "Zarezerwowano miejsce! Rozpoczęto 30s na opłacenie.".to_string(),
@@ -417,11 +417,11 @@ pub fn App() -> impl IntoView {
                                 <p class="event-venue">{evt.venue.clone()}</p>
                                 <p class="event-date">{evt.date.clone()}</p>
                                 <div class="event-stats">
-                                    <span class="stat stat-available">"Wolne: " {evt.available_seats}</span>
-                                    <span class="stat stat-held">"Hold: " {evt.held_seats}</span>
-                                    <span class="stat stat-sold">"Sprzedane: " {evt.sold_seats}</span>
+                                    <span class="status-badge badge-available">"Wolne: " {evt.available_seats}</span>
+                                    <span class="status-badge badge-held">"Hold: " {evt.held_seats}</span>
+                                    <span class="status-badge badge-sold">"Sprzedane: " {evt.sold_seats}</span>
                                     {if evt.waitlist_count > 0 {
-                                        view! { <span class="stat stat-waitlist">"Kolejka: " {evt.waitlist_count}</span> }.into_view()
+                                        view! { <span class="status-badge badge-waitlist">"Kolejka: " {evt.waitlist_count}</span> }.into_view()
                                     } else {
                                         ().into_view()
                                     }}
@@ -540,7 +540,7 @@ pub fn App() -> impl IntoView {
                                     <button
                                         class=move || if is_full { "btn btn-secondary" } else { "btn" }
                                         disabled=move || is_reserving.get()
-                                        on:click=move |_| handle_reserve()
+                                        on:click=move |_| handle_reserve(None)
                                     >
                                         {move || if is_reserving.get() {
                                             view! { <div class="spinner"></div> }.into_view()
@@ -610,18 +610,19 @@ pub fn App() -> impl IntoView {
                                         _ => "seat",
                                     };
 
-                                    let on_seat_click = {
-                                        let seat_status = seat_status.clone();
-                                        let handle_reserve = handle_reserve.clone();
-                                        move |_| {
-                                            if seat_status == "available"
-                                                && !has_hold
-                                                && !on_waitlist
-                                            {
-                                                handle_reserve();
-                                            }
-                                        }
-                                    };
+                                     let on_seat_click = {
+                                         let seat_status = seat_status.clone();
+                                         let handle_reserve = handle_reserve.clone();
+                                         let seat_id = seat.id;
+                                         move |_| {
+                                             if seat_status == "available"
+                                                 && !has_hold
+                                                 && !on_waitlist
+                                             {
+                                                 handle_reserve(Some(seat_id));
+                                             }
+                                         }
+                                     };
 
                                     let label_display = seat_label.clone();
                                     view! {
