@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN rustup target add wasm32-unknown-unknown
 
-# Download and install prebuilt trunk for Linux x86_64
-RUN wget -qO- https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf- -C /usr/local/bin
+RUN ARCH=$(uname -m) && \
+    wget -qO- https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-${ARCH}-unknown-linux-gnu.tar.gz \
+    | tar -xzf- -C /usr/local/bin
 
 COPY . .
 

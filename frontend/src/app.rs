@@ -132,8 +132,8 @@ pub fn App() -> impl IntoView {
     };
 
     // Polling triggers
-    let fetch_events_trigger = create_rw_signal(());
-    let fetch_seats_trigger = create_rw_signal(());
+    let fetch_events_trigger = create_rw_signal((0u32));
+    let fetch_seats_trigger = create_rw_signal((0u32));
 
     // Event list resource loader
     let events_resource = create_resource(
@@ -187,13 +187,13 @@ pub fn App() -> impl IntoView {
             }
             let _ = set_interval_with_handle(
                 move || {
-                    fetch_events_trigger.set(());
+                    fetch_events_trigger.update(|n| *n += 1);
                 },
                 std::time::Duration::from_secs(3),
             );
             let _ = set_interval_with_handle(
                 move || {
-                    fetch_seats_trigger.set(());
+                    fetch_seats_trigger.update(|n| *n += 1);
                 },
                 std::time::Duration::from_secs(2),
             );
@@ -296,8 +296,8 @@ pub fn App() -> impl IntoView {
                             "Zarezerwowano miejsce! Rozpoczęto 30s na opłacenie.".to_string(),
                             ToastType::Success,
                         );
-                        fetch_seats_trigger.set(());
-                        fetch_events_trigger.set(());
+                        fetch_seats_trigger.update(|n| *n += 1);
+                        fetch_events_trigger.update(|n| *n += 1);
                     }
                     Ok(ReserveResult::Waitlisted(_)) => {
                         waitlisted_events.update(|set| {
@@ -308,8 +308,8 @@ pub fn App() -> impl IntoView {
                                 .to_string(),
                             ToastType::Warning,
                         );
-                        fetch_seats_trigger.set(());
-                        fetch_events_trigger.set(());
+                        fetch_seats_trigger.update(|n| *n += 1);
+                        fetch_events_trigger.update(|n| *n += 1);
                     }
                     Err(err) => {
                         add_toast(format!("Rezerwacja nieudana: {}", err), ToastType::Error);
@@ -335,8 +335,8 @@ pub fn App() -> impl IntoView {
                             "Płatność udana! Zakupiono bilet.".to_string(),
                             ToastType::Success,
                         );
-                        fetch_seats_trigger.set(());
-                        fetch_events_trigger.set(());
+                        fetch_seats_trigger.set((0u32));
+                        fetch_events_trigger.set((0u32));
                     }
                     Err(err) => {
                         add_toast(format!("Płatność nieudana: {}", err), ToastType::Error);
@@ -358,7 +358,7 @@ pub fn App() -> impl IntoView {
                 "Zmieniono tożsamość. Wygenerowano nowy User ID.".to_string(),
                 ToastType::Success,
             );
-            fetch_seats_trigger.set(());
+            fetch_seats_trigger.set((0u32));
         }
     };
 
@@ -371,7 +371,7 @@ pub fn App() -> impl IntoView {
                 Ok(parsed) => {
                     user_id.set(parsed);
                     add_toast("Zapisano User ID.".to_string(), ToastType::Success);
-                    fetch_seats_trigger.set(());
+                    fetch_seats_trigger.set((0u32));
                 }
                 Err(_) => {
                     add_toast("Niepoprawny format UUID!".to_string(), ToastType::Error);
@@ -410,7 +410,7 @@ pub fn App() -> impl IntoView {
                         let is_selected = move || selected_event_id.get() == Some(evt_id);
                         view! {
                             <div
-                                class=move || if is_selected() { "event-card event-card-active" } else { "event-card" }
+                                class=move || if is_selected() { "event-card event-card.active" } else { "event-card" }
                                 on:click=move |_| selected_event_id.set(Some(evt_id))
                             >
                                 <h3>{evt.name.clone()}</h3>
