@@ -82,7 +82,11 @@ pub async fn fetch_seats(event_id: Uuid) -> Result<Vec<Seat>, String> {
         .map_err(|e| format!("Failed to parse seats: {}", e))
 }
 
-pub async fn reserve_seat(event_id: Uuid, user_id: Uuid, seat_id: Option<Uuid>) -> Result<ReserveResult, String> {
+pub async fn reserve_seat(
+    event_id: Uuid,
+    user_id: Uuid,
+    seat_id: Option<Uuid>,
+) -> Result<ReserveResult, String> {
     let url = format!("{}/events/{}/reservations", BASE_URL, event_id);
     let req = ReserveRequest { user_id, seat_id };
 
@@ -115,7 +119,10 @@ pub async fn reserve_seat(event_id: Uuid, user_id: Uuid, seat_id: Option<Uuid>) 
     }
 }
 
-pub async fn pay_reservation(reservation_id: Uuid, user_id: Uuid) -> Result<PaymentResponse, String> {
+pub async fn pay_reservation(
+    reservation_id: Uuid,
+    user_id: Uuid,
+) -> Result<PaymentResponse, String> {
     let url = format!("{}/reservations/{}/payment", BASE_URL, reservation_id);
     let req = PaymentRequest { user_id };
 

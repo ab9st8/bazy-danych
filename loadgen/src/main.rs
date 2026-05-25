@@ -100,9 +100,7 @@ impl Outcome {
             | Outcome::PayExpired { latency_ms }
             | Outcome::PayConflict { latency_ms }
             | Outcome::PayError { latency_ms } => Some(*latency_ms),
-            Outcome::ReserveNetworkError
-            | Outcome::Abandoned
-            | Outcome::PayNetworkError => None,
+            Outcome::ReserveNetworkError | Outcome::Abandoned | Outcome::PayNetworkError => None,
         }
     }
 }
@@ -447,7 +445,11 @@ async fn pay(
     let url = format!("{}/reservations/{}/payment", base_url, reservation_id);
 
     let start = Instant::now();
-    let res = client.post(&url).json(&PaymentBody { user_id }).send().await;
+    let res = client
+        .post(&url)
+        .json(&PaymentBody { user_id })
+        .send()
+        .await;
     let latency_ms = start.elapsed().as_millis() as u64;
 
     match res {
