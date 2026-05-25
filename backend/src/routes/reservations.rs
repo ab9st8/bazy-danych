@@ -16,6 +16,7 @@ use crate::HOLD_DURATION_SECS;
 #[derive(Deserialize)]
 pub struct ReserveRequest {
     user_id: Uuid,
+    seat_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -62,16 +63,29 @@ pub async fn reserve(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let seat_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM seats
-         WHERE event_id = $1 AND status = 'available'
-         LIMIT 1
-         FOR UPDATE SKIP LOCKED",
-    )
-    .bind(event_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let seat_id: Option<Uuid> = if let Some(req_seat_id) = body.seat_id {
+        sqlx::query_scalar(
+            "SELECT id FROM seats
+             WHERE id = $1 AND event_id = $2 AND status = 'available'
+             FOR UPDATE",
+        )
+        .bind(req_seat_id)
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    } else {
+        sqlx::query_scalar(
+            "SELECT id FROM seats
+             WHERE event_id = $1 AND status = 'available'
+             LIMIT 1
+             FOR UPDATE SKIP LOCKED",
+        )
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
 
     match seat_id {
         Some(seat_id) => {
@@ -191,4 +205,88 @@ pub async fn pay(
         }),
     )
         .into_response())
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct EventListResponse {
+    id: Uuid,
+    name: String,
+    date: String,
+    venue: String,
+    total_seats: i32,
+    available_seats: i64,
+    held_seats: i64,
+    sold_seats: i64,
+    waitlist_count: i64,
+}
+
+pub async fn get_events(
+    State(pool): State<PgPool>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let events = sqlx::query_as::<_, EventListResponse>(
+        r#"
+        SELECT
+            e.id,
+            e.name,
+            TO_CHAR(e.date, 'YYYY-MM-DD') AS date,
+            e.venue,
+            e.total_seats,
+            COUNT(CASE WHEN s.status = 'available' THEN 1 END) AS available_seats,
+            COUNT(CASE WHEN s.status = 'held' THEN 1 END) AS held_seats,
+            COUNT(CASE WHEN s.status = 'sold' THEN 1 END) AS sold_seats,
+            (SELECT COUNT(*) FROM waitlist w WHERE w.event_id = e.id) AS waitlist_count
+        FROM events e
+        LEFT JOIN seats s ON s.event_id = e.id
+        GROUP BY e.id, e.name, e.date, e.venue, e.total_seats
+        ORDER BY e.date ASC
+        "#,
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch events: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(events))
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct SeatResponse {
+    id: Uuid,
+    label: Option<String>,
+    status: String,
+    held_until_epoch: Option<f64>,
+    held_by_user_id: Option<Uuid>,
+    reservation_id: Option<Uuid>,
+}
+
+pub async fn get_event_seats(
+    State(pool): State<PgPool>,
+    Path(event_id): Path<Uuid>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let seats = sqlx::query_as::<_, SeatResponse>(
+        r#"
+        SELECT
+            s.id,
+            s.label,
+            s.status,
+            EXTRACT(EPOCH FROM s.held_until)::double precision AS held_until_epoch,
+            s.held_by_user_id,
+            r.id AS reservation_id
+        FROM seats s
+        LEFT JOIN reservations r ON r.seat_id = s.id
+        WHERE s.event_id = $1
+        ORDER BY s.label::integer
+        "#,
+    )
+    .bind(event_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch seats for event {}: {:?}", event_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(seats))
 }

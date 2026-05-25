@@ -30,6 +30,19 @@ services:
       db:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./frontend:/usr/src/app:z
+      - frontend_target:/usr/src/app/target
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
   backend_target:
+  frontend_target:

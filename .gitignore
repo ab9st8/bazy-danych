@@ -1,5 +1,8 @@
 # Rust
 backend/target/
+frontend/target/
+frontend/target_wasm/
+frontend/dist/
 backend/**/*.rs.bk
 
 # Docker
