@@ -1,4 +1,4 @@
-# Bazy danych / Programowanie w języku Rust
+# Bazy danych
 
 **semestr letni 2025/2026**
 
