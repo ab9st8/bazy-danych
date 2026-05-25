@@ -220,9 +220,7 @@ pub struct EventListResponse {
     waitlist_count: i64,
 }
 
-pub async fn get_events(
-    State(pool): State<PgPool>,
-) -> Result<impl IntoResponse, StatusCode> {
+pub async fn get_events(State(pool): State<PgPool>) -> Result<impl IntoResponse, StatusCode> {
     let events = sqlx::query_as::<_, EventListResponse>(
         r#"
         SELECT

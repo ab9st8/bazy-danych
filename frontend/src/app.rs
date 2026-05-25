@@ -23,8 +23,7 @@ pub enum ToastType {
 // ---------- LocalStorage helpers ----------
 
 fn get_stored_user_id() -> Uuid {
-    let local_storage = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten());
+    let local_storage = web_sys::window().and_then(|w| w.local_storage().ok().flatten());
 
     if let Some(storage) = local_storage {
         if let Some(val) = storage.get_item("user_id").ok().flatten() {
@@ -41,8 +40,7 @@ fn get_stored_user_id() -> Uuid {
 }
 
 fn get_stored_waitlists() -> HashSet<Uuid> {
-    let local_storage = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten());
+    let local_storage = web_sys::window().and_then(|w| w.local_storage().ok().flatten());
 
     if let Some(storage) = local_storage {
         if let Some(val) = storage.get_item("waitlisted_events").ok().flatten() {
@@ -55,8 +53,7 @@ fn get_stored_waitlists() -> HashSet<Uuid> {
 }
 
 fn save_waitlists(set: &HashSet<Uuid>) {
-    let local_storage = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten());
+    let local_storage = web_sys::window().and_then(|w| w.local_storage().ok().flatten());
     if let Some(storage) = local_storage {
         if let Ok(val) = serde_json::to_string(set) {
             let _ = storage.set_item("waitlisted_events", &val);
@@ -100,8 +97,7 @@ pub fn App() -> impl IntoView {
         let user_id = user_id;
         create_effect(move |_| {
             let id = user_id.get();
-            let local_storage = web_sys::window()
-                .and_then(|w| w.local_storage().ok().flatten());
+            let local_storage = web_sys::window().and_then(|w| w.local_storage().ok().flatten());
             if let Some(storage) = local_storage {
                 let _ = storage.set_item("user_id", &id.to_string());
             }
@@ -121,7 +117,13 @@ pub fn App() -> impl IntoView {
         let toasts = toasts;
         move |msg: String, t: ToastType| {
             let id = Uuid::new_v4();
-            toasts.update(|v| v.push(Toast { id, message: msg, toast_type: t }));
+            toasts.update(|v| {
+                v.push(Toast {
+                    id,
+                    message: msg,
+                    toast_type: t,
+                })
+            });
             set_timeout(
                 move || {
                     toasts.update(|v| v.retain(|toast| toast.id != id));
@@ -366,16 +368,14 @@ pub fn App() -> impl IntoView {
     let handle_save_user_id = {
         let add_toast = add_toast.clone();
 
-        move || {
-            match Uuid::parse_str(&user_id_input.get()) {
-                Ok(parsed) => {
-                    user_id.set(parsed);
-                    add_toast("Zapisano User ID.".to_string(), ToastType::Success);
-                    fetch_seats_trigger.set((0u32));
-                }
-                Err(_) => {
-                    add_toast("Niepoprawny format UUID!".to_string(), ToastType::Error);
-                }
+        move || match Uuid::parse_str(&user_id_input.get()) {
+            Ok(parsed) => {
+                user_id.set(parsed);
+                add_toast("Zapisano User ID.".to_string(), ToastType::Success);
+                fetch_seats_trigger.set((0u32));
+            }
+            Err(_) => {
+                add_toast("Niepoprawny format UUID!".to_string(), ToastType::Error);
             }
         }
     };
