@@ -122,8 +122,7 @@ Gdy użytkownik wybiera konkretne miejsce po ID, zapytanie używa zwykłego `FOR
 Po znalezieniu wolnego miejsca transakcja:
 1. Ustawia `status = 'held'`, uzupełnia `held_until = now() + 30s` i `held_by_user_id`.
 2. Wstawia wiersz do tabeli `reservations`.
-3. Wysyła `pg_notify` na kanał `seat_change` (opisany w sekcji 4).
-4. Zatwierdza transakcję (`COMMIT`).
+3. Zatwierdza transakcję (`COMMIT`).
 
 Odpowiedź to `201 Created` z ID rezerwacji i miejsca. Jeśli żadne miejsce nie zostało znalezione, użytkownik trafia do `waitlist` i zwracane jest `202 Accepted`.
 
